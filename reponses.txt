@@ -1,0 +1,56 @@
+Réponses aux question de la partie UML : 
+
+- A quoi sert la classe AbstractRunChat ?
+
+La classe AbstractRunChat contient toutes les méthodes communes au client et au serveur.
+
+
+- Expliquez la relation ChatServer / InputOutputClient concrétisée par l’attribut « clients ».
+
+ChatServer contient une liste de InputOutputClient, nommée " clients ". Cette liste
+(Vector) contient tous les clients connectés au serveur. Chaque objet InputOutputClient permet
+de communiquer avec le client.
+
+
+- Expliquez la relation ClientHandler / InputClient concrétisée par l’attribut « mainClient ».
+
+ClientHandler possède un attribut mainClient de type InputClient qui lui permet d'accéder a la socket,
+nom, buffer de son client.
+
+
+- Expliquez la relation ClientHandler / InputOutputClient concrétisée par l’attribut « allClients ».
+
+ClientHandler contient un attribut allClients de type Vector<InputOutputClient> qui contient 
+tous les autres clients et qui permet à un client donné d'envoyer un message à tous les autres clients.
+
+
+- Combien de threads tournent sur un serveur dans le scénario présenté par la Figure 1 (page 1) ? 
+Détaillez votre réponse en précisant qui lance qui.
+
+Au total, 3 threads tournent sur le serveur. 
+
+Quand l'utilisateur lance le serveur avec RunChatServer,
+celui-ci lance un premier thread ChatServer.
+
+Ensuite, pour chaque connexion de client au serveur, celui-ci crée un Thread de type ClientHandler.
+Dans le cas de la figure 1, 2 threads sont créés par le serveur car deux clients
+sont connectés au client.
+
+- Combien de threads tournent dans le Client 1 du scénario présenté par la Figure 1 (page 1) ?
+  Détaillez votre réponse en précisant qui lance qui.
+
+Au total 3 threads tournent dans le Client 1:
+ 1. L'utilisateur lance le client avec RunChatClient.
+ 2. RunChatClient lance un autre thread ChatClient.
+ 3. ChatClient lance 2 threads: Un pour traiter les entrées du client et un pour traiter
+                                  les messages du serveur.
+
+- A quoi sert le threads[i].join() à la fin du run de ChatClient ?
+
+Thread.join() est une méthode bloquante qui attend la fin du thread avant de continuer 
+l'éxecution du programme.
+Le ChatClient attend ici que les deux threads userHandler et serverHandler se terminent.
+
+- Que représente la classe ChatClient dans le cadre d’une architecture MVC ?
+La classe ChatClient serait un contrôleur dans un architecture MVC. Elle s'occupe du traitement des entrées/sorties
+et les envoie à la vue (interface graphique / console)
