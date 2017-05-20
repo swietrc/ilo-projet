@@ -2,13 +2,12 @@ package widgets;
 
 import java.awt.*;
 import java.awt.event.*;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
-import java.lang.reflect.Array;
+import java.security.MessageDigestSpi;
 import java.util.ArrayList;
-import java.util.Stack;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Vector;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -31,22 +30,31 @@ import models.NameSetListModel;
  */
 public class ClientFrame2 extends AbstractClientFrame
 {
+    private final SortAction sortContentAction;
+    private final SortAction sortAuthorAction;
+    private final SortAction sortDateAction;
+
+    public enum SortType { AUTHOR, CONTENT, DATE }
     private final JTextArea output;
-	private final ClearSelectionAction clearSelectedAction;
-    private final KickSelectedAction kickSelectedAction;
+
+    private final KickSelectedAction kickSelectionAction;
+    private final FilterSelectionAction filterSelectionAction;
+
+    // VIVE LES LAMBDAS ! o/
+    private Consumer<Message> msgPrinter = (Message msg) -> displayMessage(msg);
 
     /**
      * Liste des éléments à afficher dans la JList.
      * Les ajouts et retraits effectués dans cette ListModel seront alors
      * automatiquement transmis au JList contenant ce ListModel
      */
-    private DefaultListModel<String> elements = new DefaultListModel<String>();
+    private DefaultListModel<String> usersList = new DefaultListModel<String>();
 
     private ArrayList<Integer> selectedUsers;
 
     /**
      * Le modèle de sélection de la JList.
-     * Conserve les indices des éléments sélectionnés de {@link #elements} dans
+     * Conserve les indices des éléments sélectionnés de {@link #usersList} dans
      * la JList qui affiche ces éléments.
      */
     private ListSelectionModel selectionModel = null;
@@ -85,26 +93,16 @@ public class ClientFrame2 extends AbstractClientFrame
 	protected final QuitAction quitAction;
 
     /**
-     * Action à réaliser lorsque l'on souhaite supprimer les éléments
-     * sélectionnnés de la liste
-     */
-    private final Action removeAction = new RemoveItemAction();
-
-    /**
      * Action à réaliser lorsque l'on souhaite déselctionner tous les élements de la liste
      */
-    private final Action clearSelectionAction = new ClearSelectionAction();
-
-    /**
-     * Action à réaliser lorsque l'on souhaite ajouter un élément à la liste
-     */
-    private final Action addAction = new AddAction();
+    private Action clearSelectionAction;
 
 	/**
 	 * Référence à la fenêtre courante (à utiliser dans les classes internes)
 	 */
 	protected final JFrame thisRef;
 	NameSetListModel userList = new NameSetListModel();
+	ArrayList<String> userStore = new ArrayList<>();
     private static String newline = System.getProperty("line.separator");
 
     /**
@@ -140,10 +138,12 @@ public class ClientFrame2 extends AbstractClientFrame
 		sendAction = new SendAction();
 		clearAction = new ClearAction();
 		quitAction = new QuitAction();
-
-		clearSelectedAction = new ClearSelectionAction();
-		kickSelectedAction = new KickSelectedAction();
-
+		clearSelectionAction = new ClearSelectionAction();
+		kickSelectionAction = new KickSelectedAction();
+		filterSelectionAction = new FilterSelectionAction();
+        sortContentAction = new SortAction(SortType.CONTENT);
+        sortAuthorAction = new SortAction(SortType.AUTHOR);
+        sortDateAction = new SortAction(SortType.DATE);
 
 		/*
 		 * Ajout d'un listener pour fermer correctement l'application lorsque
@@ -169,35 +169,15 @@ public class ClientFrame2 extends AbstractClientFrame
         getContentPane().add(leftPanel, BorderLayout.WEST);
         leftPanel.setLayout(new BorderLayout(0, 0));
 
-        JButton btnClearSelection = new JButton("Clear Selection");
-        btnClearSelection.setAction(clearSelectionAction);
-        leftPanel.add(btnClearSelection, BorderLayout.NORTH);
-
         JScrollPane listScrollPane = new JScrollPane();
         leftPanel.add(listScrollPane, BorderLayout.CENTER);
 
-        JList<String> list = new JList<String>(elements);
+        JList<String> list = new JList<String>(usersList);
         listScrollPane.setViewportView(list);
         list.setName("Elements");
         list.setBorder(UIManager.getBorder("EditorPane.border"));
         list.setSelectedIndex(0);
         list.setCellRenderer(new ColorTextRenderer());
-
-        JPopupMenu popupMenu = new JPopupMenu();
-        addPopup(list, popupMenu);
-
-        JMenuItem mntmAdd = new JMenuItem(addAction);
-        mntmAdd.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.META_MASK));
-        popupMenu.add(mntmAdd);
-
-        JMenuItem mntmRemove = new JMenuItem(removeAction);
-        popupMenu.add(mntmRemove);
-
-        JSeparator separator = new JSeparator();
-        popupMenu.add(separator);
-
-        JMenuItem mntmClearSelection = new JMenuItem(clearSelectionAction);
-        popupMenu.add(mntmClearSelection);
 
         selectionModel = list.getSelectionModel();
         selectionModel.addListSelectionListener(new ListSelectionListener()
@@ -219,13 +199,11 @@ public class ClientFrame2 extends AbstractClientFrame
                 {
                     if (lsm.isSelectionEmpty())
                     {
-                        removeAction.setEnabled(false);
                         clearSelectionAction.setEnabled(false);
                         output.append(" <none>");
                     }
                     else
                     {
-                        removeAction.setEnabled(true);
                         clearSelectionAction.setEnabled(true);
                         // Find out which indexes are selected.
                         int minIndex = lsm.getMinSelectionIndex();
@@ -253,6 +231,7 @@ public class ClientFrame2 extends AbstractClientFrame
 
 
 		JButton quitButton = new JButton(quitAction);
+		quitButton.setHideActionText(true);
 		toolBar.add(quitButton);
 
 		toolBar.add(Box.createRigidArea(new Dimension(20, 0)));
@@ -260,20 +239,26 @@ public class ClientFrame2 extends AbstractClientFrame
 		Component toolBarSep = Box.createHorizontalGlue();
 		toolBar.add(toolBarSep);
 */
-		JButton clearSelectedButton = new JButton(clearSelectedAction);
-		clearSelectedButton.setHideActionText(true);
-		toolBar.add(clearSelectedButton);
 
-		JButton kickSelectedButton = new JButton(kickSelectedAction);
+        JButton clearSelectionButton = new JButton(clearSelectionAction);
+        clearSelectionButton.setHideActionText(true);
+        toolBar.add(clearSelectionButton);
+
+		JButton kickSelectedButton = new JButton(kickSelectionAction);
 		kickSelectedButton.setHideActionText(true);
 		toolBar.add(kickSelectedButton);
+
+		JButton filterSelectionButton = new JButton(filterSelectionAction);
+		filterSelectionButton.setHideActionText(true);
+		toolBar.add(filterSelectionButton);
 
 		toolBar.add(Box.createRigidArea(new Dimension(20, 0)));
 
 		JButton clearButton = new JButton(clearAction);
+        clearButton.setHideActionText(true);
 		toolBar.add(clearButton);
 
-		serverLabel = new JLabel(host == null ? "" : host);
+        serverLabel = new JLabel(host == null ? "" : host);
 		toolBar.add(serverLabel);
 
 		JPanel sendPanel = new JPanel();
@@ -301,21 +286,65 @@ public class ClientFrame2 extends AbstractClientFrame
 		JMenuBar menuBar = new JMenuBar();
 		setJMenuBar(menuBar);
 
-		JMenu actionsMenu = new JMenu("Actions");
-		menuBar.add(actionsMenu);
+		// ------------------------- CONNECTIONS MENU -------------------------
+		JMenu connectionsMenu = new JMenu("Connections");
+		menuBar.add(connectionsMenu);
 
-		JMenuItem sendMenuItem = new JMenuItem(sendAction);
-		actionsMenu.add(sendMenuItem);
+        JMenuItem quitMenuItem = new JMenuItem(quitAction);
+        connectionsMenu.add(quitMenuItem);
 
-		JMenuItem clearMenuItem = new JMenuItem(clearAction);
-		actionsMenu.add(clearMenuItem);
+        // ------------------------- MESSAGES MENU -----------------------------
 
-		actionsMenu.add(separator);
+		JMenu messagesMenu = new JMenu("Messages");
+        menuBar.add(messagesMenu);
 
-		JMenuItem quitMenuItem = new JMenuItem(quitAction);
-		actionsMenu.add(quitMenuItem);
+        JMenuItem clearMenuItem = new JMenuItem(clearAction);
+        messagesMenu.add(clearMenuItem);
 
-		// --------------------------------------------------------------------
+        JMenuItem filterMenuitem = new JMenuItem(filterSelectionAction);
+        messagesMenu.add(filterMenuitem);
+
+        // ------------------------- USERS MENU --------------------------------
+
+        JMenu usersMenu = new JMenu("Users");
+        menuBar.add(usersMenu);
+
+        JMenuItem clearSelectedMenuItem = new JMenuItem(clearSelectionAction);
+        usersMenu.add(clearSelectedMenuItem);
+
+        JMenuItem kickMenuItem = new JMenuItem(kickSelectionAction);
+        usersMenu.add(kickMenuItem);
+
+        JMenu sortMenu = new JMenu("Sort");
+        messagesMenu.add(sortMenu);
+
+        JMenuItem sortContentMenuItem = new JMenuItem(sortContentAction);
+        sortMenu.add(sortContentMenuItem);
+
+        JMenuItem sortAuthorMenuItem = new JMenuItem(sortAuthorAction);
+        sortMenu.add(sortAuthorMenuItem);
+
+        JMenuItem sortDateMenuItem = new JMenuItem(sortDateAction);
+        sortMenu.add(sortDateMenuItem);
+
+        // -------------------------POPUP MENU----------------------------------
+
+        JPopupMenu popupMenu = new JPopupMenu();
+        addPopup(list, popupMenu);
+
+        JMenuItem mntmClearSelection = new JMenuItem(clearSelectionAction);
+        popupMenu.add(mntmClearSelection);
+
+        JSeparator separator = new JSeparator();
+        popupMenu.add(separator);
+        popupMenu.add(kickMenuItem);
+
+        JPopupMenu rightPopup = new JPopupMenu();
+        addPopup(textPane, rightPopup);
+        rightPopup.add(sortMenu);
+
+
+        // --------------------------------------------------------------------
 		// Documents
 		// récupération du document du textPane ainsi que du documentStyle et du
 		// defaultColor du document
@@ -362,123 +391,6 @@ public class ClientFrame2 extends AbstractClientFrame
 	}
 
 	/**
-	 * Affichage d'un message dans le {@link #document}, puis passage à la ligne
-	 * (avec l'ajout de {@link Vocabulary#newLine})
-	 * La partie "[yyyy/MM/dd HH:mm:ss]" correspond à la date/heure courante
-	 * obtenue grâce à un Calendar et est affichée avec la defaultColor alors
-	 * que la partie "utilisateur > message" doit être affichée avec une couleur
-	 * déterminée d'après le nom d'utilisateur avec
-	 * {@link #getColorFromName(String)}, le nom d'utilisateur est quant à lui
-	 * déterminé d'après le message lui même avec {@link #parseName(String)}.
-	 * @param message le message à afficher dans le {@link #document}
-	 * @throws BadLocationException si l'écriture dans le document échoue
-	 * @see {@link examples.widgets.ExampleFrame#appendToDocument(String, Color)}
-	 * @see java.text.SimpleDateFormat#SimpleDateFormat(String)
-	 * @see java.util.Calendar#getInstance()
-	 * @see java.util.Calendar#getTime()
-	 * @see javax.swing.text.StyleConstants
-	 * @see javax.swing.text.StyledDocument#insertString(int, String,
-	 * javax.swing.text.AttributeSet)
-	 */
-	protected void writeMessage(String message) throws BadLocationException
-	{
-		/*
-		 * ajout du message "[yyyy/MM/dd HH:mm:ss] utilisateur > message" à
-		 * la fin du document avec la couleur déterminée d'après "utilisateur"
-		 * (voir AbstractClientFrame#getColorFromName)
-		 */
-		StringBuffer sb = new StringBuffer();
-
-		sb.append(message);
-		sb.append(Vocabulary.newLine);
-
-		// source et contenu du message avec la couleur du message
-		String source = parseName(message);
-		if ((source != null) && (source.length() > 0))
-		{
-			/*
-			 * Changement de couleur du texte
-			 */
-			StyleConstants.setForeground(documentStyle,
-			                             getColorFromName(source));
-		}
-
-		document.insertString(document.getLength(),
-		                      sb.toString(),
-		                      documentStyle);
-
-		// Retour à la couleur de texte par défaut
-		StyleConstants.setForeground(documentStyle, defaultColor);
-
-	}
-
-	/**
-	 * Recherche du nom d'utilisateur dans un message de type
-	 * "utilisateur > message".
-	 * parseName est utilisé pour extraire le nom d'utilisateur d'un message
-	 * afin d'utiliser le hashCode de ce nom pour créer une couleur dans
-	 * laquelle
-	 * sera affiché le message de cet utilisateur (ainsi tous les messages d'un
-	 * même utilisateur auront la même couleur).
-	 * @param message le message à parser
-	 * @return le nom d'utilisateur s'il y en a un sinon null
-	 */
-	protected String parseName(String message)
-	{
-		/*
-		 * renvoyer la chaine correspondant à la partie "utilisateur" dans
-		 * un message contenant "utilisateur > message", ou bien null si cette
-		 * partie n'existe pas.
-		 */
-		if (message.contains(">") && message.contains("]"))
-		{
-			int pos1 = message.indexOf(']');
-			int pos2 = message.indexOf('>');
-			try
-			{
-				return new String(message.substring(pos1 + 1, pos2 - 1));
-			}
-			catch (IndexOutOfBoundsException iobe)
-			{
-				logger.warning("ClientFrame::parseName: index out of bounds");
-				return null;
-			}
-		}
-		else
-		{
-			return null;
-		}
-	}
-
-	/**
-	 * Recherche du contenu du message dans un message de type
-	 * "utilisateur > message"
-	 * @param message le message à parser
-	 * @return le contenu du message s'il y en a un sinon null
-	 */
-	protected String parseContent(String message)
-	{
-		if (message.contains(">"))
-		{
-			int pos = message.indexOf('>');
-			try
-			{
-				return new String(message.substring(pos + 1, message.length()));
-			}
-			catch (IndexOutOfBoundsException iobe)
-			{
-				logger
-				    .warning("ClientFrame::parseContent: index out of bounds");
-				return null;
-			}
-		}
-		else
-		{
-			return message;
-		}
-	}
-
-	/**
 	 * Listener lorsque le bouton #btnClear est activé. Efface le contenu du
 	 * {@link #document}
 	 */
@@ -499,7 +411,7 @@ public class ClientFrame2 extends AbstractClientFrame
 			putValue(ACCELERATOR_KEY,
 			         KeyStroke.getKeyStroke(KeyEvent.VK_L,
 			                                InputEvent.META_MASK));
-			putValue(NAME, "Clear");
+			putValue(NAME, "Clear Messages");
 			putValue(SHORT_DESCRIPTION, "Clear document content");
 		}
 
@@ -517,6 +429,7 @@ public class ClientFrame2 extends AbstractClientFrame
 			try
 			{
 				document.remove(0, document.getLength());
+				// messageStore.clear();
 			}
 			catch (BadLocationException ex)
 			{
@@ -539,10 +452,10 @@ public class ClientFrame2 extends AbstractClientFrame
 		{
 			putValue(SMALL_ICON,
 			         new ImageIcon(ClientFrame2.class
-			             .getResource("/icons/logout-16.png")));
+			             .getResource("/icons/sent-16.png")));
 			putValue(LARGE_ICON_KEY,
 			         new ImageIcon(ClientFrame2.class
-			             .getResource("/icons/logout-32.png")));
+			             .getResource("/icons/sent-32.png")));
 			putValue(ACCELERATOR_KEY,
 			         KeyStroke.getKeyStroke(KeyEvent.VK_S,
 			                                InputEvent.META_MASK));
@@ -595,10 +508,10 @@ public class ClientFrame2 extends AbstractClientFrame
 		{
 			putValue(SMALL_ICON,
 			         new ImageIcon(ClientFrame2.class
-			             .getResource("/icons/cancel-16.png")));
+			             .getResource("/icons/disconnected-16.png")));
 			putValue(LARGE_ICON_KEY,
 			         new ImageIcon(ClientFrame2.class
-			             .getResource("/icons/cancel-32.png")));
+			             .getResource("/icons/disconnected-32.png")));
 			putValue(ACCELERATOR_KEY,
 			         KeyStroke.getKeyStroke(KeyEvent.VK_Q,
 			                                InputEvent.META_MASK));
@@ -629,8 +542,165 @@ public class ClientFrame2 extends AbstractClientFrame
 			}
 
 			sendMessage(Vocabulary.byeCmd);
+			System.exit(0);
 		}
 	}
+
+    private class FilterSelectionAction extends AbstractAction
+    {
+        /**
+         * Constructeur d'une QuitAction : met en place le nom, la description,
+         * le raccourci clavier et les small|Large icons de l'action
+         */
+        public FilterSelectionAction()
+        {
+            putValue(SMALL_ICON,
+                    new ImageIcon(ClientFrame2.class
+                            .getResource("/icons/filled_filter-16.png")));
+            putValue(LARGE_ICON_KEY,
+                    new ImageIcon(ClientFrame2.class
+                            .getResource("/icons/filled_filter-32.png")));
+            putValue(ACCELERATOR_KEY,
+                    KeyStroke.getKeyStroke(KeyEvent.VK_Q,
+                            InputEvent.META_MASK));
+            putValue(NAME, "Quit");
+            putValue(SHORT_DESCRIPTION, "Disconnect from server and quit");
+        }
+
+        /**
+         * Opérations réalisées lorsque l'action "quitter" est sollicitée
+         * @param e évènement à l'origine de l'action
+         * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
+         */
+        @Override
+        public void actionPerformed(ActionEvent e)
+        {
+            try {
+                document.remove(0, document.getLength());
+            } catch (BadLocationException e1) {
+                e1.printStackTrace();
+            }
+
+            ArrayList<String> selUserList = new ArrayList<>();
+
+            if (!selectedUsers.isEmpty()) {
+                for (int i : selectedUsers) {
+                    selUserList.add(usersList.getElementAt(i));
+                }
+            }
+
+            for (Message m : messageStore) {
+                if (selUserList.contains(m.getAuthor())) {
+                    displayMessage(m);
+                }
+            }
+        }
+    }
+
+    private class ClearSelectionAction extends AbstractAction
+    {
+        public ClearSelectionAction()
+        {
+            putValue(ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_X, InputEvent.META_MASK));
+            putValue(LARGE_ICON_KEY, new ImageIcon(ListExampleFrame.class.getResource("/icons/delete_database-32.png")));
+            putValue(SMALL_ICON, new ImageIcon(ListExampleFrame.class.getResource("/icons/delete_database-16.png")));
+            putValue(NAME, "Clear selection");
+            putValue(SHORT_DESCRIPTION, "Unselect selected items");
+        }
+
+        @Override
+        public void actionPerformed(ActionEvent e)
+        {
+            output.append("Clear selection action triggered" + newline);
+            selectionModel.clearSelection();
+        }
+    }
+
+    private class KickSelectedAction extends AbstractAction{
+        public KickSelectedAction()
+        {
+            putValue(SMALL_ICON,
+                    new ImageIcon(ClientFrame2.class
+                            .getResource("/icons/remove_user-16.png")));
+            putValue(LARGE_ICON_KEY,
+                    new ImageIcon(ClientFrame2.class
+                            .getResource("/icons/remove_user-32.png")));
+            putValue(ACCELERATOR_KEY,
+                    KeyStroke.getKeyStroke(KeyEvent.VK_M,
+                            InputEvent.META_MASK));
+            putValue(NAME, "Kick selected");
+            putValue(SHORT_DESCRIPTION, "Kick selected user(s)");
+        }
+
+        /**
+         * Opérations réalisées lorsque l'action "kicker les utilisateurs sélectionnés" est sollicitée
+         * @param e évènement à l'origine de l'action
+         * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
+         */
+        @Override
+        public void actionPerformed(ActionEvent e)
+        {
+            if (!selectedUsers.isEmpty()) {
+                for (int i : selectedUsers) {
+                    String currentUser = userStore.get(i);
+                    System.out.println("Kick " + currentUser);
+                }
+            }
+        }
+
+    }
+
+    private class SortAction extends AbstractAction {
+	    SortType sortType;
+	    String name;
+	    public SortAction(SortType sortType) {
+            this.sortType = sortType;
+            switch (sortType) {
+                case DATE:
+                    this.name = "date";
+                    break;
+                case AUTHOR:
+                    this.name = "author";
+                    break;
+                case CONTENT:
+                    this.name = "content";
+                    break;
+            }
+            putValue(NAME, this.name);
+            putValue(SHORT_DESCRIPTION, "Sort by " + this.name);
+        }
+
+        @Override
+        public void actionPerformed(ActionEvent e) {
+	        this.removeOrderTypes();
+            switch (this.sortType) {
+                case DATE:
+                    Message.addOrder(Message.MessageOrder.DATE);
+                    break;
+                case AUTHOR:
+                    Message.addOrder(Message.MessageOrder.AUTHOR);
+                    break;
+                case CONTENT:
+                    Message.addOrder(Message.MessageOrder.CONTENT);
+                    break;
+            }
+            try {
+                document.remove(0, document.getLength());
+            } catch (BadLocationException e1) {
+                e1.printStackTrace();
+            }
+
+            Collections.sort(messageStore);
+            messageStore.stream().forEach(msgPrinter);
+
+        }
+
+        private void removeOrderTypes() {
+            Message.removeOrder(Message.MessageOrder.DATE);
+            Message.removeOrder(Message.MessageOrder.AUTHOR);
+            Message.removeOrder(Message.MessageOrder.CONTENT);
+        }
+    }
 
 	/**
 	 * Classe gérant la fermeture correcte de la fenêtre. La fermeture correcte
@@ -702,9 +772,6 @@ public class ClientFrame2 extends AbstractClientFrame
 				 * read from input (doit être bloquant)
 				 */
 				messageIn = (Message) inOS.readObject();
-				logger.warning("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCcc");
-				logger.warning(messageIn.toString());
-                logger.warning("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCcc");
 			}
 			catch (IOException e)
 			{
@@ -726,7 +793,6 @@ public class ClientFrame2 extends AbstractClientFrame
                     e.printStackTrace();
                 }
 
-                Consumer<Message> msgPrinter = (Message msg) -> displayMessage(msg);
                 try {
                     document.remove(0, document.getLength());
                     messageStore.stream().sorted().forEach(msgPrinter);
@@ -776,10 +842,15 @@ public class ClientFrame2 extends AbstractClientFrame
 
 	private void displayMessage(Message msg) {
 		String author = msg.getAuthor();
-		if ((author != null) && (author.length() > 0) && !elements.contains(author)) {
-		    elements.addElement(author);
+		if ((author != null) && (author.length() > 0) && !userStore.contains(author)) {
+            userStore.add(author);
+            Collections.sort(userStore);
+		    usersList.clear();
+		    for (String s : userStore)
+		        usersList.addElement(s);
 		}
 		try {
+            StyleConstants.setForeground(documentStyle, getColorFromName(msg.getAuthor()));
 			document.insertString(document.getLength(), msg.toString() + Vocabulary.newLine, documentStyle);
 		} catch (BadLocationException e) {
 			e.printStackTrace();
@@ -788,7 +859,7 @@ public class ClientFrame2 extends AbstractClientFrame
 	}
 
 	/**
-	 * Color Text renderer for drawing list's elements in colored text
+	 * Color Text renderer for drawing list's usersList in colored text
 	 * @author davidroussel
 	 */
 	public static class ColorTextRenderer extends JLabel
@@ -834,118 +905,4 @@ public class ClientFrame2 extends AbstractClientFrame
 		}
 	}
 
-    private class ClearSelectionAction extends AbstractAction
-    {
-        public ClearSelectionAction()
-        {
-            putValue(ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_X, InputEvent.META_MASK));
-            putValue(LARGE_ICON_KEY, new ImageIcon(ListExampleFrame.class.getResource("/examples/icons/delete_sign-32.png")));
-            putValue(SMALL_ICON, new ImageIcon(ListExampleFrame.class.getResource("/examples/icons/delete_sign-16.png")));
-            putValue(NAME, "Clear selection");
-            putValue(SHORT_DESCRIPTION, "Unselect selected items");
-        }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
-        {
-            output.append("Clear selection action triggered" + newline);
-            selectionModel.clearSelection();
-        }
-    }
-
-    private class AddAction extends AbstractAction
-    {
-        public AddAction()
-        {
-            putValue(ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_A, InputEvent.META_MASK));
-            putValue(SMALL_ICON, new ImageIcon(ListExampleFrame.class.getResource("/examples/icons/add_user-16.png")));
-            putValue(LARGE_ICON_KEY, new ImageIcon(ListExampleFrame.class.getResource("/examples/icons/add_user-32.png")));
-            putValue(NAME, "Add...");
-            putValue(SHORT_DESCRIPTION, "Add item");
-        }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
-        {
-            output.append("Add action triggered" + newline);
-            String inputValue = JOptionPane.showInputDialog("New item name");
-            if (inputValue != null)
-            {
-                if (inputValue.length() > 0)
-                {
-                    elements.addElement(inputValue);
-                }
-            }
-        }
-    }
-
-    private class RemoveItemAction extends AbstractAction
-    {
-        public RemoveItemAction()
-        {
-            putValue(ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.META_MASK));
-            putValue(SMALL_ICON, new ImageIcon(ListExampleFrame.class.getResource("/examples/icons/remove_user-16.png")));
-            putValue(LARGE_ICON_KEY, new ImageIcon(ListExampleFrame.class.getResource("/examples/icons/remove_user-32.png")));
-            putValue(NAME, "Remove");
-            putValue(SHORT_DESCRIPTION, "Removes item from list");
-        }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
-        {
-            output.append("Remove action triggered for indexes : ");
-            int minIndex = selectionModel.getMinSelectionIndex();
-            int maxIndex = selectionModel.getMaxSelectionIndex();
-            Stack<Integer> toRemove = new Stack<Integer>();
-            for (int i = minIndex; i <= maxIndex; i++)
-            {
-                if (selectionModel.isSelectedIndex(i))
-                {
-                    output.append(" " + i);
-                    toRemove.push(new Integer(i));
-                }
-            }
-            output.append(newline);
-            while (!toRemove.isEmpty())
-            {
-                int index = toRemove.pop().intValue();
-                output.append("removing element: "
-                        + elements.getElementAt(index) + newline);
-                elements.remove(index);
-            }
-        }
-    }
-
-    private class KickSelectedAction extends AbstractAction{
-        public KickSelectedAction()
-        {
-            putValue(SMALL_ICON,
-                    new ImageIcon(ClientFrame2.class
-                            .getResource("/icons/remove_user-16.png")));
-            putValue(LARGE_ICON_KEY,
-                    new ImageIcon(ClientFrame2.class
-                            .getResource("/icons/remove_user-32.png")));
-            putValue(ACCELERATOR_KEY,
-                    KeyStroke.getKeyStroke(KeyEvent.VK_M,
-                            InputEvent.META_MASK));
-            putValue(NAME, "Kick selected");
-            putValue(SHORT_DESCRIPTION, "Kick selected user(s)");
-        }
-
-        /**
-         * Opérations réalisées lorsque l'action "kicker les utilisateurs sélectionnés" est sollicitée
-         * @param e évènement à l'origine de l'action
-         * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-         */
-        @Override
-        public void actionPerformed(ActionEvent evt)
-        {
-            for (int i : selectedUsers) {
-				String currentUser = elements.getElementAt(i);
-				outPW.println("Kick " + currentUser);
-				elements.remove(i);
-			}
-        }
-
-    }
 }
