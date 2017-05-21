@@ -429,7 +429,7 @@ public class ClientFrame2 extends AbstractClientFrame
 			try
 			{
 				document.remove(0, document.getLength());
-				// messageStore.clear();
+				messageStore.clear();
 			}
 			catch (BadLocationException ex)
 			{
