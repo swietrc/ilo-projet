@@ -11,6 +11,8 @@ import java.util.Collections;
 import java.util.Vector;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -30,6 +32,7 @@ import models.NameSetListModel;
  */
 public class ClientFrame2 extends AbstractClientFrame
 {
+
     private final SortAction sortContentAction;
     private final SortAction sortAuthorAction;
     private final SortAction sortDateAction;
@@ -643,7 +646,7 @@ public class ClientFrame2 extends AbstractClientFrame
             if (!selectedUsers.isEmpty()) {
                 for (int i : selectedUsers) {
                     String currentUser = userStore.get(i);
-                    System.out.println("Kick " + currentUser);
+                    outPW.println("Kick " + currentUser);
                 }
             }
         }
@@ -747,30 +750,8 @@ public class ClientFrame2 extends AbstractClientFrame
 		while (commonRun.booleanValue())
 		{
 			messageIn = null;
-			/*
-			 * - Lecture d'une ligne de texte en provenance du serveur avec inBR
-			 * Si une exception survient lors de cette lecture on quitte la
-			 * boucle.
-			 * - Si cette ligne de texte n'est pas nulle on affiche le message
-			 * dans le document avec le format voulu en utilisant
-			 * #writeMessage(String)
-			 * - Après la fin de la boucle on change commonRun à false de
-			 * manière synchronisée afin que les autres threads utilisant ce
-			 * commonRun puissent s'arrêter eux aussi :
-			 * synchronized(commonRun)
-			 * {
-			 * commonRun = Boolean.FALSE;
-			 * }
-			 * Dans toutes les étapes si un problème survient (erreur,
-			 * exception, ...) on quitte la boucle en ayant au préalable ajouté
-			 * un "warning" ou un "severe" au logger (en fonction de l'erreur
-			 * rencontrée) et mis le commonRun à false (de manière synchronisé).
-			 */
 			try
 			{
-				/*
-				 * read from input (doit être bloquant)
-				 */
 				messageIn = (Message) inOS.readObject();
 			}
 			catch (IOException e)
@@ -785,14 +766,7 @@ public class ClientFrame2 extends AbstractClientFrame
 
 			if (messageIn != null)
 			{
-
 				messageStore.add(messageIn);
-                try {
-                    document.remove(0, document.getLength());
-                } catch (BadLocationException e) {
-                    e.printStackTrace();
-                }
-
                 try {
                     document.remove(0, document.getLength());
                     messageStore.stream().sorted().forEach(msgPrinter);
@@ -842,15 +816,26 @@ public class ClientFrame2 extends AbstractClientFrame
 
 	private void displayMessage(Message msg) {
 		String author = msg.getAuthor();
-		if ((author != null) && (author.length() > 0) && !userStore.contains(author)) {
-            userStore.add(author);
-            Collections.sort(userStore);
-		    usersList.clear();
-		    for (String s : userStore)
-		        usersList.addElement(s);
-		}
-		try {
+		if (author != null) {
             StyleConstants.setForeground(documentStyle, getColorFromName(msg.getAuthor()));
+            if ((author.length() > 0) && !userStore.contains(author)) {
+                userStore.add(author);
+                Collections.sort(userStore);
+            }
+		} else {
+            Pattern disconnectPattern = Pattern.compile("(.*) logged out$");
+            Matcher disconnectMatcher = disconnectPattern.matcher(msg.getContent());
+            if (disconnectMatcher.matches()) {
+                userStore.remove(disconnectMatcher.group(1));
+            }
+		}
+
+		// Refresh user list interface
+        usersList.clear();
+        for (String s : userStore)
+            usersList.addElement(s);
+
+		try {
 			document.insertString(document.getLength(), msg.toString() + Vocabulary.newLine, documentStyle);
 		} catch (BadLocationException e) {
 			e.printStackTrace();
