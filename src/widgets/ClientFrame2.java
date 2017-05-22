@@ -847,7 +847,7 @@ public class ClientFrame2 extends AbstractClientFrame
 	 * Color Text renderer for drawing list's usersList in colored text
 	 * @author davidroussel
 	 */
-	public static class ColorTextRenderer extends JLabel
+	public class ColorTextRenderer extends JLabel
 			implements ListCellRenderer<String>
 	{
 		private Color color = null;
@@ -869,7 +869,7 @@ public class ClientFrame2 extends AbstractClientFrame
 			{
 				if (value.length() > 0)
 				{
-					color = new Color(value.hashCode()).darker();
+                    color = getColorFromName(value);
 				}
 			}
 			setText(value);
